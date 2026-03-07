@@ -7,7 +7,7 @@ import { io, Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Mic, MicOff, Video, VideoOff, MonitorUp, LogOut, Loader2, Users, MessageSquare, BarChart2, HelpCircle, Paperclip, Smile, Send } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, MonitorUp, LogOut, Loader2, Users, MessageSquare, BarChart2, HelpCircle, Paperclip, Smile, Send, ChevronDown } from "lucide-react";
 import { PollView } from "@/components/meet/PollView";
 import { QuizView } from "@/components/meet/QuizView";
 import { cn } from "@/lib/utils";
@@ -57,9 +57,11 @@ export default function MeetPage() {
     const [inputMsg, setInputMsg] = useState("");
     const [participantCount, setParticipantCount] = useState(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const chatContainerRef = useRef<HTMLDivElement>(null);
     const [reactions, setReactions] = useState<{ id: string; emoji: string; x: number; isSelf: boolean; senderName?: string }[]>([]);
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [selectedFile, setSelectedFile] = useState<{ name: string, type: string, url: string } | null>(null);
+    const [showScrollBottom, setShowScrollBottom] = useState(false);
 
     // LiveKit State
     const [token, setToken] = useState("");
@@ -160,6 +162,7 @@ export default function MeetPage() {
                 fileType: data.fileType
             }]);
             if (activeTab !== "chat") setUnread(prev => ({ ...prev, chat: prev.chat + 1 }));
+            scrollToBottom();
         });
 
         newSocket.on("new-reaction", (data: any) => {
@@ -203,6 +206,28 @@ export default function MeetPage() {
         });
         setInputMsg("");
         setSelectedFile(null);
+    };
+
+    const scrollToBottom = () => {
+        setTimeout(() => {
+            if (chatContainerRef.current) {
+                chatContainerRef.current.scrollTo({
+                    top: chatContainerRef.current.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }
+        }, 100);
+    };
+
+    const handleChatScroll = () => {
+        if (!chatContainerRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+        // Show button if we are scrolled up more than 100px from the bottom
+        if (scrollHeight - scrollTop - clientHeight > 100) {
+            setShowScrollBottom(true);
+        } else {
+            setShowScrollBottom(false);
+        }
     };
 
     const endSession = async () => {
@@ -298,6 +323,20 @@ export default function MeetPage() {
                                 80% { opacity: 0.8; transform: translateY(-80px) scale(1.1); }
                                 100% { opacity: 0; transform: translateY(-120px) scale(0.9); }
                             }
+                            .dark-scrollbar::-webkit-scrollbar {
+                                width: 6px;
+                            }
+                            .dark-scrollbar::-webkit-scrollbar-track {
+                                background: #0f172a; /* slate-900 */
+                                border-radius: 8px;
+                            }
+                            .dark-scrollbar::-webkit-scrollbar-thumb {
+                                background: #334155; /* slate-700 */
+                                border-radius: 8px;
+                            }
+                            .dark-scrollbar::-webkit-scrollbar-thumb:hover {
+                                background: #475569; /* slate-600 */
+                            }
                         `}</style>
                         <div className="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900/30">
                             <div className="flex items-center gap-2">
@@ -309,7 +348,11 @@ export default function MeetPage() {
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 relative">
+                        <div
+                            ref={chatContainerRef}
+                            onScroll={handleChatScroll}
+                            className="flex-1 overflow-y-auto p-4 space-y-4 relative dark-scrollbar"
+                        >
                             {/* Floating Reactions overlay */}
                             <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-50 h-full overflow-hidden">
                                 {reactions.map(r => (
@@ -351,9 +394,18 @@ export default function MeetPage() {
                                     <span className="text-[10px] text-gray-500 mt-1 px-1">{msg.time}</span>
                                 </div>
                             ))}
+
+                            {showScrollBottom && (
+                                <button
+                                    onClick={scrollToBottom}
+                                    className="sticky bottom-2 left-1/2 -translate-x-1/2 bg-gray-800/90 hover:bg-gray-700 text-white p-1.5 rounded-full shadow-lg border border-gray-700 transition-all z-40 backdrop-blur"
+                                >
+                                    <ChevronDown className="h-5 w-5" />
+                                </button>
+                            )}
                         </div>
 
-                        <div className="p-3 border-t border-gray-800 bg-gray-900/50">
+                        <div className="p-3 border-t border-gray-800 bg-gray-900/50 relative">
                             {/* Floating Reaction Bar */}
                             <div className="px-2 pb-3 pt-1 flex items-center justify-between opacity-90 transition-opacity">
                                 <button onClick={() => triggerReaction('YES')} className="text-emerald-400 font-bold hover:scale-110 transition-transform tracking-wider focus:outline-none text-sm">YES</button>
