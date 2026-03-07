@@ -153,6 +153,9 @@ export function QuizView({ quizzes, isTeacher, onCreateQuiz, onAnswer }: QuizVie
                         </Card>
                     );
                 })}
+                {quizzes.length === 0 && !isCreating && (
+                    <div className="text-center text-gray-500 py-8 text-sm">No active quizes</div>
+                )}
             </div>
         </div>
     );
