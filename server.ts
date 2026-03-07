@@ -92,6 +92,10 @@ app.prepare().then(async () => {
             io.to(data.roomId).emit("new-message", data);
         });
 
+        socket.on("send-reaction", (data) => {
+            io.to(data.roomId).emit("new-reaction", data);
+        });
+
         // --- Poll Events ---
         socket.on("create-poll", (data: { roomId: string, question: string, options: string[] }) => {
             const newPoll: Poll = {
