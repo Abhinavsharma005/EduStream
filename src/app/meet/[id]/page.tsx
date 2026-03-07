@@ -1,16 +1,17 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Mic, MicOff, Video, VideoOff, MonitorUp, LogOut, Loader2, Users, MessageSquare, BarChart2, HelpCircle } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, MonitorUp, LogOut, Loader2, Users, MessageSquare, BarChart2, HelpCircle, Paperclip, Smile, Send } from "lucide-react";
 import { PollView } from "@/components/meet/PollView";
 import { QuizView } from "@/components/meet/QuizView";
 import { cn } from "@/lib/utils";
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 
 import {
     LiveKitRoom,
@@ -28,6 +29,9 @@ interface Message {
     text: string;
     time: string;
     isSelf: boolean;
+    fileUrl?: string;
+    fileName?: string;
+    fileType?: string;
 }
 
 export default function MeetPage() {
@@ -52,6 +56,10 @@ export default function MeetPage() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputMsg, setInputMsg] = useState("");
     const [participantCount, setParticipantCount] = useState(0);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [reactions, setReactions] = useState<{ id: string; emoji: string; x: number; isSelf: boolean; senderName?: string }[]>([]);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [selectedFile, setSelectedFile] = useState<{ name: string, type: string, url: string } | null>(null);
 
     // LiveKit State
     const [token, setToken] = useState("");
@@ -138,7 +146,7 @@ export default function MeetPage() {
 
         newSocket.on("update-quiz-results", (data: { quizId: string, answers: any }) => {
             setQuizzes(prev => prev.map(q => q.id === data.quizId ? { ...q, answers: data.answers } : q));
-            
+
         });
 
         newSocket.on("new-message", (data: any) => {
@@ -146,21 +154,55 @@ export default function MeetPage() {
                 sender: data.sender || "Unknown",
                 text: data.message,
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                isSelf: data.senderId === userId
+                isSelf: data.senderId === userId,
+                fileUrl: data.fileUrl,
+                fileName: data.fileName,
+                fileType: data.fileType
             }]);
             if (activeTab !== "chat") setUnread(prev => ({ ...prev, chat: prev.chat + 1 }));
         });
+
+        newSocket.on("new-reaction", (data: any) => {
+            if (data.senderId !== userId) {
+                const id = Math.random().toString(36).substr(2, 9);
+                setReactions(prev => [...prev, {
+                    id,
+                    emoji: data.emoji,
+                    x: Math.floor(Math.random() * 80) + 10,
+                    isSelf: false,
+                    senderName: data.senderName
+                }]);
+                setTimeout(() => {
+                    setReactions(prev => prev.filter(r => r.id !== id));
+                }, 3000);
+            }
+        });
+    };
+
+    const triggerReaction = (emj: string) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        setReactions(prev => [...prev, { id, emoji: emj, x: Math.floor(Math.random() * 80) + 10, isSelf: true, senderName: user?.name }]);
+        if (socket && user) {
+            socket.emit("send-reaction", { roomId, emoji: emj, senderId: user.id, senderName: user.name });
+        }
+        setTimeout(() => {
+            setReactions(prev => prev.filter(r => r.id !== id));
+        }, 3000);
     };
 
     const sendMessage = () => {
-        if (!inputMsg.trim() || !socket || !user) return;
+        if ((!inputMsg.trim() && !selectedFile) || !socket || !user) return;
         socket.emit("send-message", {
             roomId,
             message: inputMsg,
             sender: user.name,
-            senderId: user.id
+            senderId: user.id,
+            fileUrl: selectedFile?.url,
+            fileName: selectedFile?.name,
+            fileType: selectedFile?.type
         });
         setInputMsg("");
+        setSelectedFile(null);
     };
 
     const endSession = async () => {
@@ -249,6 +291,14 @@ export default function MeetPage() {
                 <div className="flex-1 overflow-hidden relative">
                     {/* Chat View */}
                     <div className={cn("absolute inset-0 flex flex-col transition-transform duration-300", activeTab === "chat" ? "translate-x-0" : activeTab === "quiz" ? "-translate-x-full" : "-translate-x-full")}>
+                        <style>{`
+                            @keyframes floatUp {
+                                0% { opacity: 0; transform: translateY(20px) scale(0.5); }
+                                15% { opacity: 1; transform: translateY(0px) scale(1.2); }
+                                80% { opacity: 0.8; transform: translateY(-80px) scale(1.1); }
+                                100% { opacity: 0; transform: translateY(-120px) scale(0.9); }
+                            }
+                        `}</style>
                         <div className="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-900/30">
                             <div className="flex items-center gap-2">
                                 <h3 className="font-semibold text-xs tracking-wide uppercase text-gray-400">Live Chat</h3>
@@ -259,7 +309,23 @@ export default function MeetPage() {
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 relative">
+                            {/* Floating Reactions overlay */}
+                            <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-50 h-full overflow-hidden">
+                                {reactions.map(r => (
+                                    <div key={r.id} className="absolute flex flex-col items-center justify-center bottom-2"
+                                        style={{ left: `${r.x}%`, animation: 'floatUp 3s ease-out forwards' }}>
+                                        <span className={cn(
+                                            "drop-shadow-lg",
+                                            r.emoji === 'YES' ? "text-2xl text-emerald-400 font-bold" :
+                                                r.emoji === 'NO' ? "text-2xl text-rose-400 font-bold" :
+                                                    "text-3xl"
+                                        )}>{r.emoji}</span>
+                                        {r.senderName && <span className="text-[10px] text-white/80 bg-black/50 px-1.5 py-0.5 rounded-full mt-1 whitespace-nowrap">{r.senderName}</span>}
+                                    </div>
+                                ))}
+                            </div>
+
                             {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-gray-600 text-sm gap-2 opacity-50">
                                 <MessageSquare className="h-8 w-8" />
                                 <p>No messages yet</p>
@@ -268,7 +334,19 @@ export default function MeetPage() {
                                 <div key={idx} className={`flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2 duration-300`}>
                                     <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm shadow-sm ${msg.isSelf ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}`}>
                                         {!msg.isSelf && <p className="text-[10px] font-bold mb-1 opacity-70 uppercase tracking-wider text-blue-300">{msg.sender}</p>}
-                                        <p className="leading-snug">{msg.text}</p>
+                                        {msg.fileUrl && (
+                                            <div className="mb-2">
+                                                {msg.fileType?.startsWith('image/') ? (
+                                                    <img src={msg.fileUrl} alt="attachment" className="max-w-full max-h-[150px] rounded object-contain border border-white/20" />
+                                                ) : (
+                                                    <a href={msg.fileUrl} download={msg.fileName} className={`flex items-center gap-2 p-2 rounded border ${msg.isSelf ? 'bg-blue-700/50 border-blue-500/50 hover:bg-blue-700' : 'bg-gray-900 border-gray-700 hover:bg-gray-800'} transition-colors inline-flex`}>
+                                                        <Paperclip className="h-4 w-4 shrink-0" />
+                                                        <span className="text-xs truncate max-w-[150px]">{msg.fileName}</span>
+                                                    </a>
+                                                )}
+                                            </div>
+                                        )}
+                                        {msg.text && <p className="leading-snug">{msg.text}</p>}
                                     </div>
                                     <span className="text-[10px] text-gray-500 mt-1 px-1">{msg.time}</span>
                                 </div>
@@ -276,17 +354,81 @@ export default function MeetPage() {
                         </div>
 
                         <div className="p-3 border-t border-gray-800 bg-gray-900/50">
-                            <div className="flex gap-2 relative">
-                                <Input
+                            {/* Floating Reaction Bar */}
+                            <div className="px-2 pb-3 pt-1 flex items-center justify-between opacity-90 transition-opacity">
+                                <button onClick={() => triggerReaction('YES')} className="text-emerald-400 font-bold hover:scale-110 transition-transform tracking-wider focus:outline-none text-sm">YES</button>
+                                <button onClick={() => triggerReaction('NO')} className="text-rose-400 font-bold hover:scale-110 transition-transform tracking-wider focus:outline-none text-sm">NO</button>
+                                <button onClick={() => triggerReaction('😂')} className="text-lg hover:scale-110 transition-transform focus:outline-none">😂</button>
+                                <button onClick={() => triggerReaction('🎉')} className="text-lg hover:scale-110 transition-transform focus:outline-none">🎉</button>
+                                <button onClick={() => triggerReaction('👏')} className="text-lg hover:scale-110 transition-transform focus:outline-none">👏</button>
+                                <button onClick={() => triggerReaction('👍')} className="text-lg hover:scale-110 transition-transform focus:outline-none">👍</button>
+                            </div>
+
+                            <div className="relative bg-[#1A1C23] border border-gray-700 rounded-xl p-2 flex flex-col focus-within:border-gray-500 transition-colors">
+                                {selectedFile && (
+                                    <div className="flex items-center gap-2 p-1.5 bg-gray-800/80 rounded mb-2 border border-gray-700 relative w-max max-w-[90%]">
+                                        {selectedFile.type.startsWith('image/') ? (
+                                            <img src={selectedFile.url} alt="preview" className="h-8 w-8 object-cover rounded" />
+                                        ) : (
+                                            <div className="h-8 w-8 bg-gray-700 flex items-center justify-center rounded">
+                                                <Paperclip className="h-4 w-4 text-gray-400" />
+                                            </div>
+                                        )}
+                                        <div className="text-xs text-gray-300 truncate max-w-[120px]">{selectedFile.name}</div>
+                                        <button onClick={() => setSelectedFile(null)} className="absolute -top-1.5 -right-1.5 bg-red-500 rounded-full p-0.5 text-white hover:bg-red-600 focus:outline-none z-10">
+                                            <svg width="10" height="10" viewBox="0 0 15 15" fill="none"><path d="M11.7816 4.03157C12.0062 3.80702 12.0062 3.44295 11.7816 3.2184C11.557 2.99385 11.193 2.99385 10.9684 3.2184L7.50005 6.68673L4.03164 3.21832C3.80708 2.99376 3.44301 2.99376 3.21846 3.21832C2.9939 3.44287 2.9939 3.80694 3.21846 4.0315L6.68687 7.49991L3.21846 10.9683C2.9939 11.1929 2.9939 11.557 3.21846 11.7815C3.44301 12.0061 3.80708 12.0061 4.03164 11.7815L7.50005 8.3131L10.9684 11.7815C11.193 12.0061 11.557 12.0061 11.7816 11.7815C12.0062 11.557 12.0062 11.1929 11.7816 10.9683L8.31322 7.49991L11.7816 4.03157Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path></svg>
+                                        </button>
+                                    </div>
+                                )}
+                                <textarea
                                     value={inputMsg}
                                     onChange={e => setInputMsg(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                                    placeholder="Type a message..."
-                                    className="bg-gray-800 border-gray-700 text-white focus:ring-blue-500 rounded-full pl-4 pr-10 h-10 text-sm"
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            sendMessage();
+                                        }
+                                    }}
+                                    placeholder="Message.."
+                                    className="w-full bg-transparent text-white placeholder:text-gray-400 resize-none outline-none text-sm px-1 min-h-[55px]"
                                 />
-                                <Button onClick={sendMessage} size="icon" className="absolute right-1 top-1 h-8 w-8 rounded-full bg-blue-600 hover:bg-blue-500 transition-all">
-                                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" className="ml-0.5"><path d="M1.20308 1.04312C1.00481 0.954998 0.772341 1.0048 0.627577 1.16641C0.482813 1.32802 0.458794 1.56455 0.568117 1.7517L3.06812 6.0317C3.1575 6.18469 3.32057 6.27972 3.5 6.27972H7.5C7.77614 6.27972 8 6.50358 8 6.77972C8 7.05586 7.77614 7.27972 7.5 7.27972H3.5C3.32057 7.27972 3.1575 7.37475 3.06812 7.52775L0.568117 11.8077C0.458794 11.9949 0.482813 12.2314 0.627577 12.393C0.772341 12.5546 1.00481 12.6044 1.20308 12.5163L14.2031 6.73632C14.408 6.64523 14.5424 6.44465 14.5424 6.21972C14.5424 5.99479 14.408 5.79421 14.2031 5.70312L1.20308 1.04312Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path></svg>
-                                </Button>
+                                <div className="flex justify-between items-end mt-1 px-1">
+                                    <div className="flex gap-4 text-gray-400 mb-1">
+                                        <input
+                                            type="file"
+                                            ref={fileInputRef}
+                                            className="hidden"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    const reader = new FileReader();
+                                                    reader.onload = (evt) => {
+                                                        setSelectedFile({
+                                                            name: file.name,
+                                                            type: file.type,
+                                                            url: evt.target?.result as string
+                                                        });
+                                                    };
+                                                    reader.readAsDataURL(file);
+                                                }
+                                                // reset the input so same file can be selected again if removed
+                                                e.target.value = '';
+                                            }}
+                                        />
+                                        <button onClick={() => fileInputRef.current?.click()} className="hover:text-white transition-colors focus:outline-none">
+                                            <Paperclip className="h-[18px] w-[18px]" />
+                                        </button>
+
+                                        <div className="relative">
+                                            <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="hover:text-white transition-colors focus:outline-none">
+                                                <Smile className="h-[18px] w-[18px]" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <Button onClick={sendMessage} size="icon" className="h-8 w-8 rounded bg-blue-600 hover:bg-blue-500 transition-all flex-shrink-0">
+                                        <Send className="h-[15px] w-[15px] ml-0.5" />
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -312,6 +454,21 @@ export default function MeetPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Global Overlays */}
+            {showEmojiPicker && (
+                <div className="fixed bottom-24 right-6 z-[9999] shadow-2xl drop-shadow-2xl">
+                    <EmojiPicker
+                        theme={Theme.DARK}
+                        onEmojiClick={(emojiData: any) => {
+                            setInputMsg(p => p + emojiData.emoji);
+                            setShowEmojiPicker(false);
+                        }}
+                        width={320}
+                        height={400}
+                    />
+                </div>
+            )}
         </div>
     );
 }
@@ -319,7 +476,7 @@ export default function MeetPage() {
 import { UserAvatar } from "@/components/UserAvatar";
 
 function VideoLayout({ isTeacher, teacherProfile, teacherName }: { isTeacher: boolean, teacherProfile?: string, teacherName: string }) {
-   
+
     const tracks = useTracks(
         [Track.Source.Camera, Track.Source.ScreenShare],
         { onlySubscribed: false }
